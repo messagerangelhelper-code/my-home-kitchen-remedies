@@ -233,3 +233,15 @@ details summary { font-weight: 700; cursor: pointer; }
 .system-row:first-child { border-top: 0; padding-top: 0; }
 
 .community-btn { display: inline-block; text-decoration: none; text-align: center; }
+
+/* Search help: MedlinePlus results and urgent-help messages */
+.medline h2 { font-size: 1.1rem; }
+.medline-list { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 12px; }
+.medline-list li { border-top: 1px solid var(--line); padding-top: 10px; }
+.medline-list p { margin: 6px 0; overflow-wrap: anywhere; }
+.medline-list a { font-weight: 700; }
+.medline-credit { margin: 12px 0 0; }
+.urgent { background: #fdecea; border: 2px solid #b3261e; border-radius: 12px; padding: 14px; margin-top: 12px; }
+.urgent h2 { color: #8c1d18; }
+.urgent p { margin: 6px 0 12px; }
+.urgent-call { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; background: #b3261e; border-color: #b3261e; color: #fff; }
