@@ -8,6 +8,45 @@ import Premium from "./Premium.jsx";
 import Account from "./Account.jsx";
 import { supabase } from "./account.js";
 import { isPremium, checkPremiumOnce, syncAccount } from "./premium.js";
+import { searchRemedies, queryWords, urgentKind } from "./search.js";
+import { lookUpTopics } from "./medline.js";
+
+const URGENT_TEXT = {
+  "911": { title: "This may be an emergency", body: "Call 911 now, or have someone take you to the nearest emergency room. Don't wait to try a home remedy.", call: "tel:911", label: "Call 911" },
+  poison: { title: "Call Poison Help now", body: "Call 1-800-222-1222, free and open 24 hours. If the person is not breathing, collapsed or having a seizure, call 911.", call: "tel:18002221222", label: "Call 1-800-222-1222" },
+  crisis: { title: "You don't have to go through this alone", body: "Call or text 988 to reach the Suicide & Crisis Lifeline, free and open 24 hours. If you're in danger right now, call 911.", call: "tel:988", label: "Call or text 988" },
+};
+
+function MedlineResults({ status, topics, hasRemedies, words }) {
+  if (status === "idle") return null;
+  // When we have remedies, MedlinePlus is a quiet extra: only show it if it found something.
+  if (hasRemedies && (status !== "done" || topics.length === 0)) return null;
+  return (
+    <section className="card medline">
+      <h2>{hasRemedies ? "More from MedlinePlus.gov" : `No home remedy for “${words.join(" ")}” yet`}</h2>
+      {!hasRemedies && <p className="muted small">Here's official health information instead.</p>}
+      {status === "loading" && <p className="muted small">Looking this up…</p>}
+      {status === "error" && <p className="muted small">Couldn't load health information right now. Try again in a minute.</p>}
+      {status === "done" && topics.length === 0 && (
+        <p className="muted small">No match there either. Try a simpler word, like “cough” or “rash”, or pick a topic above.</p>
+      )}
+      {status === "done" && topics.length > 0 && (
+        <ul className="medline-list">
+          {topics.map((t) => (
+            <li key={t.url}>
+              <strong>{t.title}</strong>
+              {t.summary && <p className="small">{t.summary}</p>}
+              <a href={t.url} target="_blank" rel="noopener noreferrer">Read more on MedlinePlus.gov</a>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="muted small medline-credit">
+        Information from MedlinePlus.gov, U.S. National Library of Medicine. Not medical advice. See a doctor if symptoms are severe, last, or get worse.
+      </p>
+    </section>
+  );
+}
 
 const byId = Object.fromEntries(REMEDIES.map((r) => [r.id, r]));
 
@@ -105,15 +144,26 @@ export default function App() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  const list = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return REMEDIES.filter((r) => {
-      if (problem && !r.problems.includes(problem)) return false;
-      if (!q) return true;
-      const probNames = r.problems.map((p) => PROBLEMS.find((x) => x.id === p)?.name || "").join(" ");
-      return `${r.title} ${r.forWhat} ${probNames} ${r.ingredients.join(" ")}`.toLowerCase().includes(q);
-    });
-  }, [problem, query]);
+  const list = useMemo(
+    () => searchRemedies(query, REMEDIES.filter((r) => !problem || r.problems.includes(problem)), PROBLEMS),
+    [problem, query],
+  );
+  const words = useMemo(() => queryWords(query), [query]);
+  const urgent = urgentKind(query);
+  const [medline, setMedline] = useState({ status: "idle", topics: [] });
+
+  // Look up MedlinePlus a moment after typing stops.
+  useEffect(() => {
+    if (urgent || words.join(" ").length < 3) { setMedline({ status: "idle", topics: [] }); return undefined; }
+    const ctrl = new AbortController();
+    const t = setTimeout(() => {
+      setMedline({ status: "loading", topics: [] });
+      lookUpTopics(words, ctrl.signal)
+        .then((topics) => setMedline({ status: "done", topics: list.length ? topics.slice(0, 2) : topics }))
+        .catch((e) => { if (e.name !== "AbortError") setMedline({ status: "error", topics: [] }); });
+    }, 700);
+    return () => { clearTimeout(t); ctrl.abort(); };
+  }, [words.join(" "), urgent, list.length]);
 
   const open = (id) => { setOpenId(id); setView("remedy"); };
   const goPremium = () => setView("premium");
@@ -198,6 +248,13 @@ export default function App() {
               <h1>What's bothering you?</h1>
               <label htmlFor="search" className="sr-only">Search remedies</label>
               <input id="search" type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="e.g. cough, itchy skin, burn" />
+              {urgent && (
+                <div className="urgent" role="alert">
+                  <h2>{URGENT_TEXT[urgent].title}</h2>
+                  <p>{URGENT_TEXT[urgent].body}</p>
+                  <a className="btn-primary urgent-call" href={URGENT_TEXT[urgent].call}>{URGENT_TEXT[urgent].label}</a>
+                </div>
+              )}
               <div className="problems">
                 {PROBLEMS.map((p) => (
                   <button key={p.id} type="button" className={problem === p.id ? "problem on" : "problem"} aria-pressed={problem === p.id}
@@ -236,13 +293,15 @@ export default function App() {
               <strong>Emergency?</strong> Call 911 for trouble breathing, chest pain, a severe burn, or signs of a serious allergic reaction. These remedies are for minor, everyday problems.
             </div>
 
-            {list.length === 0 ? (
-              <p className="empty">No remedies match that yet. Try another word, or pick a topic above.</p>
-            ) : (
+            {list.length > 0 && !urgent && (
               <ul className="remedy-list">
                 {list.map((r) => <RemedyCard key={r.id} r={r} profile={data.profile} saved={premium && data.favorites.includes(r.id)} onOpen={open} />)}
               </ul>
             )}
+            {list.length === 0 && words.join(" ").length < 3 && (
+              <p className="empty">No remedies match that yet. Try another word, or pick a topic above.</p>
+            )}
+            {!urgent && <MedlineResults status={medline.status} topics={medline.topics} hasRemedies={list.length > 0} words={words} />}
 
             {!premium && (
               <section className="card premium-teaser">
