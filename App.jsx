@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { BRAND } from "./brand.js";
 import { REMEDIES, PROBLEMS, LEVELS, PROFILES, LAST_REVIEWED } from "./remedies.js";
 import { ITEMS, NEEDS, itemName } from "./kitchen.js";
@@ -150,6 +150,15 @@ export default function App() {
   );
   const words = useMemo(() => queryWords(query), [query]);
   const urgent = urgentKind(query);
+  const searching = Boolean(problem) || query.trim().length > 0;
+  const answerRef = useRef(null);
+  const [jump, setJump] = useState(0);
+  // Bring the answer into view when a topic is picked or Search is pressed.
+  useEffect(() => {
+    if (!jump || !answerRef.current) return;
+    answerRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    answerRef.current.classList.remove("glow"); void answerRef.current.offsetWidth; answerRef.current.classList.add("glow");
+  }, [jump]);
   const [medline, setMedline] = useState({ status: "idle", topics: [] });
 
   // Look up MedlinePlus a moment after typing stops.
@@ -247,7 +256,9 @@ export default function App() {
             <section className="card hero">
               <h1>What's bothering you?</h1>
               <label htmlFor="search" className="sr-only">Search remedies</label>
-              <input id="search" type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="e.g. cough, itchy skin, burn" />
+              <form role="search" onSubmit={(e) => { e.preventDefault(); e.target.querySelector("input").blur(); setJump((n) => n + 1); }}>
+                <input id="search" type="search" enterKeyHint="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="e.g. cough, itchy skin, burn" />
+              </form>
               {urgent && (
                 <div className="urgent" role="alert">
                   <h2>{URGENT_TEXT[urgent].title}</h2>
@@ -258,12 +269,33 @@ export default function App() {
               <div className="problems">
                 {PROBLEMS.map((p) => (
                   <button key={p.id} type="button" className={problem === p.id ? "problem on" : "problem"} aria-pressed={problem === p.id}
-                    onClick={() => setProblem(problem === p.id ? "" : p.id)}>
+                    onClick={() => { setProblem(problem === p.id ? "" : p.id); if (problem !== p.id) setJump((n) => n + 1); }}>
                     <span aria-hidden="true">{p.icon}</span>{p.name}
                   </button>
                 ))}
               </div>
             </section>
+
+            {searching && !urgent && (
+              <section ref={answerRef} className="answer" aria-live="polite">
+                <p className="answer-tag">👉 Your answer</p>
+                <h2 className="answer-title">
+                  {list.length > 0
+                    ? `${list.length} ${list.length === 1 ? "remedy" : "remedies"} for ${query.trim() ? `“${query.trim()}”` : (PROBLEMS.find((p) => p.id === problem) || {}).name}`
+                    : "No home remedy match yet"}
+                </h2>
+                {list.length > 0 && (
+                  <ul className="remedy-list">
+                    {list.map((r) => <RemedyCard key={r.id} r={r} profile={data.profile} saved={premium && data.favorites.includes(r.id)} onOpen={open} />)}
+                  </ul>
+                )}
+                {list.length === 0 && words.join(" ").length < 3 && (
+                  <p className="empty">No remedies match that yet. Try another word, or pick a topic above.</p>
+                )}
+                <MedlineResults status={medline.status} topics={medline.topics} hasRemedies={list.length > 0} words={words} />
+                <button type="button" className="link" onClick={() => { setProblem(""); setQuery(""); window.scrollTo({ top: 0, behavior: "smooth" }); }}>✕ Clear and start over</button>
+              </section>
+            )}
 
             <div className="quick-nav">
               <button type="button" className="qn" onClick={() => setView("saved")}>★ My Remedies{!premium && <span className="pill-premium">Premium</span>}</button>
@@ -292,16 +324,6 @@ export default function App() {
             <div className="emergency">
               <strong>Emergency?</strong> Call 911 for trouble breathing, chest pain, a severe burn, or signs of a serious allergic reaction. These remedies are for minor, everyday problems.
             </div>
-
-            {list.length > 0 && !urgent && (
-              <ul className="remedy-list">
-                {list.map((r) => <RemedyCard key={r.id} r={r} profile={data.profile} saved={premium && data.favorites.includes(r.id)} onOpen={open} />)}
-              </ul>
-            )}
-            {list.length === 0 && words.join(" ").length < 3 && (
-              <p className="empty">No remedies match that yet. Try another word, or pick a topic above.</p>
-            )}
-            {!urgent && <MedlineResults status={medline.status} topics={medline.topics} hasRemedies={list.length > 0} words={words} />}
 
             {!premium && (
               <section className="card premium-teaser">
@@ -337,33 +359,33 @@ export default function App() {
             <section className="card">
               <h1>{remedy.title}</h1>
               <p className="rc-meta"><LevelBadge level={remedy.level} /> <span className="muted small">{LEVELS[remedy.level].label} · {remedy.time}</span></p>
-              <p>{remedy.forWhat}</p>
+              <p className="for-what"><strong>Helps with:</strong> {remedy.forWhat}</p>
               <p className="muted small">{LEVELS[remedy.level].note}</p>
             </section>
 
             {myWarnings.length > 0 && (
               <section className="card alert-box" role="note">
-                <h2>Check first</h2>
+                <h2>⚠️ Check first</h2>
                 <ul className="plain">{myWarnings.map((w) => <li key={w.text}>{w.text}</li>)}</ul>
               </section>
             )}
 
             <section className="card">
-              <h2>You'll need</h2>
+              <h2>🧺 You'll need</h2>
               <ul className="plain">{remedy.ingredients.map((i) => <li key={i}>{i}</li>)}</ul>
-              <h2>How to make it</h2>
+              <h2 className="hl">👉 How to make it</h2>
               <ol className="steps">{remedy.steps.map((s) => <li key={s}>{s}</li>)}</ol>
             </section>
 
             {remedy.avoid.length > 0 && (
               <section className="card careful">
-                <h2>Be careful</h2>
+                <h2>⚠️ Be careful</h2>
                 <ul className="plain">{remedy.avoid.map((a) => <li key={a.text}>{a.text}</li>)}</ul>
               </section>
             )}
 
             <section className="card doctor">
-              <h2>See a doctor if</h2>
+              <h2>🩺 See a doctor if</h2>
               <ul className="plain">{remedy.doctor.map((d) => <li key={d}>{d}</li>)}</ul>
             </section>
 
@@ -378,7 +400,7 @@ export default function App() {
             </div>
 
             <section className="card sources">
-              <h2>Sources</h2>
+              <h2>📚 Sources</h2>
               <ul className="plain">{remedy.sources.map((s) => <li key={s.url}><a href={s.url} target="_blank" rel="noopener noreferrer">{s.name}</a></li>)}</ul>
               <p className="muted small">Information only, not medical advice. Reviewed {LAST_REVIEWED}.</p>
             </section>
@@ -399,18 +421,18 @@ export default function App() {
               </section>
               {mine.length > 0 && (
                 <section className="card alert-box" role="note">
-                  <h2>Check first</h2>
+                  <h2>⚠️ Check first</h2>
                   <ul className="plain">{mine.map((w) => <li key={w.text}>{w.text}</li>)}</ul>
                 </section>
               )}
               <section className="card">
-                <h2>You'll need</h2>
+                <h2>🧺 You'll need</h2>
                 <ul className="plain">{n.ingredients.map((i) => <li key={i}>{i}</li>)}</ul>
-                <h2>How to make it</h2>
+                <h2 className="hl">👉 How to make it</h2>
                 <ol className="steps">{n.steps.map((s) => <li key={s}>{s}</li>)}</ol>
               </section>
               <section className="card">
-                <h2>What each body system gets</h2>
+                <h2>💪 What each body system gets</h2>
                 <div className="systems">
                   {n.systems.map(([sys, what, from]) => (
                     <div key={sys} className="system-row">
@@ -422,14 +444,14 @@ export default function App() {
                 </div>
               </section>
               <section className="card careful">
-                <h2>Be careful</h2>
+                <h2>⚠️ Be careful</h2>
                 <ul className="plain">{n.avoid.map((a) => <li key={a.text}>{a.text}</li>)}</ul>
               </section>
               <div className="button-row">
                 <button type="button" className="btn-secondary" onClick={() => window.print()}>Print</button>
               </div>
               <section className="card sources">
-                <h2>Sources</h2>
+                <h2>📚 Sources</h2>
                 <ul className="plain">{n.sources.map((s) => <li key={s.url}><a href={s.url} target="_blank" rel="noopener noreferrer">{s.name}</a></li>)}</ul>
                 <p className="muted small">Information only, not medical advice. Reviewed {LAST_REVIEWED}.</p>
               </section>
